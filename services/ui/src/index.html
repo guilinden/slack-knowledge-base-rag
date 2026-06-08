@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html ng-app="knowledgeBase" lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Base</title>
+  <link rel="stylesheet" href="app.css" />
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.3/angular.min.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.8.3/angular-sanitize.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="app.js"></script>
+</head>
+
+<body ng-controller="ChatController" ng-class="{'sidebar-open': sidebarOpen}">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">⚡</span>
+      <span class="sidebar-title">Knowledge Base</span>
+    </div>
+
+    <div class="sidebar-section">
+      <label class="sidebar-label">Topic filter</label>
+      <input
+        class="sidebar-input"
+        type="text"
+        ng-model="topic"
+        placeholder="e.g. infrastructure"
+      />
+    </div>
+
+    <div class="sidebar-section">
+      <label class="sidebar-label">Context chunks</label>
+      <div class="topk-row">
+        <input class="sidebar-input topk-input" type="number" ng-model="topK" min="1" max="10" />
+        <span class="sidebar-hint">top results</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <label class="sidebar-label">Repos registered</label>
+      <div class="repo-list">
+        <a class="sidebar-repo" ng-repeat="repo in repos track by repo.id"
+           ng-href="{{ repo.github_url }}" target="_blank">
+          <div class="sidebar-repo-header">
+            <span class="repo-dot"></span>
+            <span class="sidebar-repo-name">{{ repo.name }}</span>
+            <span class="sidebar-repo-arrow">↗</span>
+          </div>
+          <p class="sidebar-repo-desc" ng-if="repo.description">{{ repo.description }}</p>
+          <p class="sidebar-repo-desc muted" ng-if="!repo.description">No description</p>
+        </a>
+        <div class="repo-chip muted" ng-if="repos.length === 0">None loaded</div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="btn-ghost" ng-click="clearChat()">Clear chat</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Header -->
+    <header class="topbar">
+      <button class="menu-btn" ng-click="sidebarOpen = !sidebarOpen" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+      <h1 class="topbar-title">Knowledge Base</h1>
+      <div class="topbar-meta" ng-if="topic">
+        <span class="topic-badge">{{ topic }}</span>
+      </div>
+    </header>
+
+    <!-- Messages -->
+    <div class="messages" id="chat-messages">
+
+      <!-- Empty state -->
+      <div class="empty-state" ng-if="messages.length === 0">
+        <div class="empty-icon">🧠</div>
+        <h2>What do you want to know?</h2>
+        <p>Ask a question or give an instruction — I'll search the knowledge base and act if needed.</p>
+        <div class="suggestions">
+          <button class="suggestion" ng-click="useSuggestion('What messaging infrastructure did we decide on?')">What messaging infrastructure did we decide on?</button>
+          <button class="suggestion" ng-click="useSuggestion('How does authentication work in our platform?')">How does authentication work in our platform?</button>
+          <button class="suggestion" ng-click="useSuggestion('Increase replica count for the order-workflow service to 3')">Increase replica count for the order-workflow service to 3</button>
+        </div>
+      </div>
+
+      <!-- Message list -->
+      <div class="message-wrapper" ng-repeat="msg in messages track by $index" ng-class="msg.role">
+
+        <!-- User message -->
+        <div class="bubble user-bubble" ng-if="msg.role === 'user'">
+          <p>{{ msg.text }}</p>
+          <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
+        </div>
+
+        <!-- Error -->
+        <div class="card error-card" ng-if="msg.role === 'error'">
+          <div class="card-icon error-icon">✕</div>
+          <p>{{ msg.text }}</p>
+        </div>
+
+        <!-- Assistant — answer -->
+        <div class="card answer-card" ng-if="msg.role === 'assistant' && msg.type === 'answer'">
+          <div class="card-body">
+            <div class="answer-text" ng-bind-html="msg.data.answer | markdown"></div>
+          </div>
+
+          <div class="card-footer">
+            <!-- Repos -->
+            <div class="meta-section" ng-if="msg.data.repos && msg.data.repos.length > 0">
+              <button class="toggle-btn" ng-click="msg.showRepos = !msg.showRepos">
+                <span class="toggle-icon" ng-class="{rotated: msg.showRepos}">▸</span>
+                Repos ({{ msg.data.repos.length }})
+              </button>
+              <div class="meta-items" ng-show="msg.showRepos">
+                <a class="repo-item" ng-repeat="r in msg.data.repos" ng-href="{{ r.github_url }}" target="_blank">
+                  <span class="repo-item-name">{{ r.name }}</span>
+                  <span class="repo-item-desc" ng-if="r.description">{{ r.description }}</span>
+                </a>
+              </div>
+            </div>
+
+            <!-- Sources -->
+            <div class="meta-section" ng-if="msg.data.sources && msg.data.sources.length > 0">
+              <button class="toggle-btn" ng-click="msg.showSources = !msg.showSources">
+                <span class="toggle-icon" ng-class="{rotated: msg.showSources}">▸</span>
+                Sources ({{ msg.data.sources.length }})
+              </button>
+              <div class="meta-items" ng-show="msg.showSources">
+                <div class="source-item" ng-repeat="s in msg.data.sources">
+                  <span class="source-score">{{ (s.score * 100).toFixed(0) }}%</span>
+                  <span class="source-channel">#{{ s.channel }}</span>
+                  <span class="source-summary">{{ s.summary }}</span>
+                  <a class="source-link" ng-if="s.thread_url" ng-href="{{ s.thread_url }}" target="_blank">↗ Thread</a>
+                </div>
+              </div>
+            </div>
+
+            <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
+          </div>
+        </div>
+
+        <!-- Assistant — action -->
+        <div class="card action-card" ng-if="msg.role === 'assistant' && msg.type === 'action'">
+          <div class="action-header">
+            <span class="action-badge">⚡ Action taken</span>
+          </div>
+
+          <div class="card-body">
+            <a class="pr-link" ng-href="{{ msg.data.pr_url }}" target="_blank" ng-if="msg.data.pr_url">
+              <span class="pr-icon">↗</span>
+              <span>{{ msg.data.pr_title || 'View Pull Request' }}</span>
+            </a>
+
+            <div class="reasoning" ng-if="msg.data.reasoning">
+              <p>{{ msg.data.reasoning }}</p>
+            </div>
+
+            <div class="files-changed" ng-if="msg.data.files_changed && msg.data.files_changed.length > 0">
+              <span class="files-label">Files changed</span>
+              <code class="file-path" ng-repeat="f in msg.data.files_changed">{{ f }}</code>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <div class="meta-section" ng-if="msg.data.repos && msg.data.repos.length > 0">
+              <button class="toggle-btn" ng-click="msg.showRepos = !msg.showRepos">
+                <span class="toggle-icon" ng-class="{rotated: msg.showRepos}">▸</span>
+                Repos ({{ msg.data.repos.length }})
+              </button>
+              <div class="meta-items" ng-show="msg.showRepos">
+                <a class="repo-item" ng-repeat="r in msg.data.repos" ng-href="{{ r.github_url }}" target="_blank">
+                  <span class="repo-item-name">{{ r.name }}</span>
+                </a>
+              </div>
+            </div>
+            <span class="timestamp">{{ formatTime(msg.timestamp) }}</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Loading indicator -->
+      <div class="message-wrapper assistant" ng-show="loading">
+        <div class="card loading-card">
+          <div class="dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Input bar -->
+    <div class="input-bar">
+      <div class="input-wrap">
+        <textarea
+          id="question-input"
+          class="question-input"
+          ng-model="question"
+          ng-keydown="keyDown($event)"
+          placeholder="Ask a question or give an instruction…"
+          rows="1"
+          ng-disabled="loading"
+        ></textarea>
+        <button
+          class="send-btn"
+          ng-click="send()"
+          ng-disabled="loading || !question.trim()"
+          aria-label="Send"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <p class="input-hint">Enter to send · Shift+Enter for new line</p>
+    </div>
+
+  </div>
+
+</body>
+</html>
