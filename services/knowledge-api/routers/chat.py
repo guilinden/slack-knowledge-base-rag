@@ -1,3 +1,5 @@
+services/knowledge-api/routers/chat.py
+```python
 import asyncio
 
 from fastapi import APIRouter, HTTPException
@@ -22,11 +24,19 @@ async def chat_query(body: ChatQueryRequest) -> ChatQueryResponse:
     except Exception:
         intent = 'question'
 
-    # Embed + search Qdrant (needed for both intents)
+    # --- HyDE: generate a hypothetical answer and embed it for richer retrieval ---
     try:
-        vector = await asyncio.to_thread(embedding_service.embed_text, body.question)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Embedding failed: {e}')
+        hypothetical_answer = await asyncio.to_thread(
+            llm_service.generate_hypothetical_answer, body.question
+        )
+        hyde_text = f"{body.question}\n\n{hypothetical_answer}"
+        vector = await asyncio.to_thread(embedding_service.embed_text, hyde_text)
+    except Exception:
+        # Fall back to plain question embedding if HyDE fails
+        try:
+            vector = await asyncio.to_thread(embedding_service.embed_text, body.question)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f'Embedding failed: {e}')
 
     try:
         hits = await asyncio.to_thread(qdrant_service.search_points, vector, body.top_k, body.topic)
@@ -147,3 +157,4 @@ def _build_repo_context(raw_repos: list[dict]) -> list[dict]:
         }
         for r in raw_repos
     ]
+```
