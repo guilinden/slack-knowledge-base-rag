@@ -45,6 +45,15 @@ _CLASSIFY_SYSTEM = (
     '"question" if it is asking for information or an explanation.'
 )
 
+_HYDE_SYSTEM = (
+    'You are a technical knowledge base assistant for a software development team.'
+    ' Your job is to write a hypothetical knowledge base entry that would perfectly'
+    ' answer the user\'s question. Write it as if it were an actual entry extracted'
+    ' from a Slack thread — concise, factual, and in the style of a team decision'
+    ' or architectural note. Do not answer the question directly; instead, produce'
+    ' the kind of document that, if it existed, would contain the answer.'
+)
+
 
 def summarize_thread(messages: list[dict]) -> dict:
     thread_text = '\n'.join(f'{m["author"]}: {m["text"]}' for m in messages)
@@ -97,3 +106,11 @@ def classify_intent(question: str) -> str:
         HumanMessage(content=question),
     ]).strip().lower()
     return 'action' if 'action' in text else 'question'
+
+
+def generate_hyde_document(question: str) -> str:
+    chain = _llm() | StrOutputParser()
+    return chain.invoke([
+        _cached_system(_HYDE_SYSTEM),
+        HumanMessage(content=question),
+    ]).strip()
