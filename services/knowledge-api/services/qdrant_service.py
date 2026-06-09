@@ -1,3 +1,4 @@
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 
@@ -55,6 +56,48 @@ def search_points(vector: list[float], limit: int, topic: str | None = None) -> 
         query_filter=query_filter,
     )
     return result.points
+
+
+def hyde_search_points(
+    hypothetical_vectors: list[list[float]],
+    limit: int,
+    topic: str | None = None,
+) -> list:
+    """Search using HyDE (Hypothetical Document Embeddings).
+
+    Each hypothetical vector is queried independently against the collection and
+    the results are merged, de-duplicated and re-ranked by their best (highest)
+    score before the final *limit* results are returned.
+    """
+    query_filter = None
+    if topic:
+        query_filter = Filter(
+            must=[FieldCondition(key='topic', match=MatchValue(value=topic))]
+        )
+
+    # Fetch more candidates per vector so that after de-duplication we still
+    # have enough results to fill the requested limit.
+    candidates_per_vector = max(limit * 2, 10)
+
+    # point_id -> best scoring ScoredPoint
+    best: dict[str, object] = {}
+
+    client = get_client()
+    for vector in hypothetical_vectors:
+        result = client.query_points(
+            collection_name=config.COLLECTION_NAME,
+            query=vector,
+            limit=candidates_per_vector,
+            with_payload=True,
+            query_filter=query_filter,
+        )
+        for point in result.points:
+            pid = str(point.id)
+            if pid not in best or point.score > best[pid].score:
+                best[pid] = point
+
+    ranked = sorted(best.values(), key=lambda p: p.score, reverse=True)
+    return ranked[:limit]
 
 
 def upsert_repo_point(repo_id: str, vector: list[float], payload: dict) -> None:
